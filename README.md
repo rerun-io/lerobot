@@ -1,3 +1,27 @@
+## This is a fork of [LeRobot](https://github.com/huggingface/lerobot) that uses [Rerun](https://rerun.io) to visualize the training progress.
+
+To replicate the result in the video above just train a diffusion model on the pusht dataset by cloning this repository and running the following code:
+
+```
+pip install -e '.[pusht]'
+WANDB_MODE=offline python lerobot/scripts/train.py \
+  hydra.run.dir=outputs/train/diffusion_pusht \
+  hydra.job.name=diffusion_pusht \
+  policy=diffusion \
+  env=pusht \
+  env.task=PushT-v0 \
+  dataset_repo_id=lerobot/pusht \
+  training.offline_steps=20000 \
+  training.save_freq=5000 ++training.log_freq=50 \
+  training.eval_freq=1500 \
+  eval.n_episodes=50 \
+  wandb.enable=true \
+  wandb.disable_artifact=true \
+  device=cuda
+```
+
+If you don't have CUDA installed you will have to change the last argument `device=cuda` to `device=cpu` or another device.
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="media/lerobot-logo-thumbnail.png">

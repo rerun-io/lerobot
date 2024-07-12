@@ -55,6 +55,7 @@ from typing import Callable
 import einops
 import gymnasium as gym
 import numpy as np
+import rerun as rr
 import torch
 from datasets import Dataset, Features, Image, Sequence, Value, concatenate_datasets
 from huggingface_hub import snapshot_download
@@ -215,6 +216,8 @@ def eval_policy(
     start_seed: int | None = None,
     enable_progbar: bool = False,
     enable_inner_progbar: bool = False,
+    cur_step: int = 0, # Needed when logging to rerun to set the timeline
+    next_eval_step: int = 1,
 ) -> dict:
     """
     Args:
@@ -362,6 +365,10 @@ def eval_policy(
             ):
                 if n_episodes_rendered >= max_episodes_rendered:
                     break
+
+                for frame_idx, frame in enumerate(stacked_frames[:done_index+1]):
+                    rr.set_time_seconds("step", cur_step + frame_idx*((next_eval_step-cur_step)/(1.4*done_index)))
+                    rr.log(f"simulated_episode/{n_episodes_rendered}", rr.Image(frame))
 
                 videos_dir.mkdir(parents=True, exist_ok=True)
                 video_path = videos_dir / f"eval_episode_{n_episodes_rendered}.mp4"
@@ -566,6 +573,8 @@ def main(
             start_seed=hydra_cfg.seed,
             enable_progbar=True,
             enable_inner_progbar=True,
+            cur_step=0,
+            next_eval_step=200,
         )
     print(info["aggregated"])
 

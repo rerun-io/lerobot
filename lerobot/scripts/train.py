@@ -20,6 +20,8 @@ from pathlib import Path
 from pprint import pformat
 
 import hydra
+import rerun as rr
+import rerun.blueprint as rrb
 import torch
 from deepdiff import DeepDiff
 from omegaconf import DictConfig, OmegaConf
@@ -189,6 +191,13 @@ def log_train_info(logger: Logger, info, step, cfg, dataset, is_offline):
     info["num_epochs"] = num_epochs
     info["is_offline"] = is_offline
 
+    rr.set_time_seconds("step", step)
+    rr.log("train_info/loss", rr.Scalar(loss))
+    rr.log("train_info/grad_norm", rr.Scalar(grad_norm))
+    rr.log("train_info/lr", rr.Scalar(lr))
+    rr.log("train_info/update_time_secs", rr.Scalar(update_s))
+    rr.log("train_info/dataloading_time_secs", rr.Scalar(dataloading_s))
+    
     logger.log_dict(info, step, mode="train")
 
 
@@ -233,6 +242,11 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
         raise NotImplementedError()
 
     init_logging()
+
+    # Says if the evaluation marker is up or down right now. Switch to indicate a evaluation step.
+    eval_marker_up = True
+    rr.set_time_seconds("step", 0)
+    rr.log("eval_marker", rr.Scalar(1000))
 
     # If we are resuming a run, we need to check that a checkpoint exists in the log directory, and we need
     # to check for any differences between the provided config and the checkpoint's config.
@@ -350,6 +364,8 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
                     videos_dir=Path(out_dir) / "eval" / f"videos_step_{step_identifier}",
                     max_episodes_rendered=4,
                     start_seed=cfg.seed,
+                    cur_step=step,
+                    next_eval_step=step+cfg.training.eval_freq,
                 )
             log_eval_info(logger, eval_info["aggregated"], step, cfg, offline_dataset, is_offline=True)
             if cfg.wandb.enable:
@@ -418,13 +434,28 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
         train_info["dataloading_s"] = dataloading_s
 
+        if cfg.training.eval_freq > 0 and step % cfg.training.eval_freq == 0:
+            if eval_marker_up:
+                rr.set_time_seconds("step", step-cfg.training.eval_freq/20)
+                rr.log("eval_marker", rr.Scalar(1000))
+                rr.set_time_seconds("step", step)
+                rr.log("eval_marker", rr.Scalar(-1000))
+            else:
+                rr.set_time_seconds("step", step-cfg.training.eval_freq/20)
+                rr.log("eval_marker", rr.Scalar(-1000))
+                rr.set_time_seconds("step", step)
+                rr.log("eval_marker", rr.Scalar(1000))
+
+            eval_marker_up = not eval_marker_up            
+
         if step % cfg.training.log_freq == 0:
             log_train_info(logger, train_info, step, cfg, offline_dataset, is_offline=True)
+            #last_loss = 
+
 
         # Note: evaluate_and_checkpoint_if_needed happens **after** the `step`th training update has completed,
         # so we pass in step + 1.
         evaluate_and_checkpoint_if_needed(step + 1)
-
         step += 1
 
     if eval_env:
@@ -434,6 +465,34 @@ def train(cfg: DictConfig, out_dir: str | None = None, job_name: str | None = No
 
 @hydra.main(version_base="1.2", config_name="default", config_path="../configs")
 def train_cli(cfg: dict):
+    rr.init("lerobot", spawn=True)
+
+    blueprint = rrb.Blueprint(
+        rrb.Vertical(
+            rrb.Horizontal(
+                rrb.Grid(
+                    *(
+                        rrb.Spatial2DView(origin=f"simulated_episode/{i}") for i in range(4)
+                    ) 
+                ),
+                rrb.Vertical(
+                    rrb.TimeSeriesView(origin="train_info/grad_norm"),
+                    rrb.TimeSeriesView(origin="train_info/lr"),
+                    rrb.TimeSeriesView(origin="train_info/update_time_secs"),
+                    rrb.TimeSeriesView(origin="train_info/dataloading_time_secs"),
+                    rrb.TimeSeriesView(
+                        axis_y=rrb.ScalarAxis(range=(-0.0001, 10.0)),
+                        contents=["train_info/loss", "eval_marker"],
+                    ),
+                    row_shares=[1, 1, 1, 1, 3]
+                ),
+            ),
+        ),
+        auto_space_views=False,
+        collapse_panels=True,
+    )
+    rr.send_blueprint(blueprint)
+
     train(
         cfg,
         out_dir=hydra.core.hydra_config.HydraConfig.get().run.dir,
