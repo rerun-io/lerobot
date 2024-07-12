@@ -1,5 +1,7 @@
 ## This is a fork of [LeRobot](https://github.com/huggingface/lerobot) that uses [Rerun](https://rerun.io) to visualize the training progress.
 
+https://github.com/user-attachments/assets/1d25c967-e9db-48b7-a421-0566284ba6d1
+
 To replicate the result in the video above just train a diffusion model on the pusht dataset by cloning this repository and running the following code:
 
 ```
