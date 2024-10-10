@@ -114,6 +114,7 @@ from pathlib import Path
 import cv2
 import torch
 import tqdm
+import rerun as rr
 from omegaconf import DictConfig
 from PIL import Image
 from termcolor import colored
@@ -128,8 +129,10 @@ from lerobot.common.datasets.video_utils import encode_video_frames
 from lerobot.common.policies.factory import make_policy
 from lerobot.common.robot_devices.robots.factory import make_robot
 from lerobot.common.robot_devices.robots.utils import Robot, get_arm_id
+from lerobot.common.robot_devices.robots.manipulator import ManipulatorRobot
 from lerobot.common.robot_devices.utils import busy_wait, safe_disconnect
 from lerobot.common.utils.utils import get_safe_torch_device, init_hydra_config, init_logging, set_global_seed
+from lerobot.common.utils.vis_rerun import log_observation, target_state_action_blueprint
 from lerobot.scripts.eval import get_pretrained_policy_path
 from lerobot.scripts.push_dataset_to_hub import (
     push_dataset_card_to_hub,
@@ -185,6 +188,7 @@ def log_control_info(robot: Robot, dt_s, episode_index=None, frame_index=None, f
 
     def log_dt(shortname, dt_val_s):
         nonlocal log_items, fps
+        rr.log(f'control_info/{shortname}', rr.Scalar(dt_val_s))
         info_str = f"{shortname}:{dt_val_s * 1000:5.2f} ({1/ dt_val_s:3.1f}hz)"
         if fps is not None:
             actual_fps = 1 / dt_val_s
@@ -216,8 +220,9 @@ def log_control_info(robot: Robot, dt_s, episode_index=None, frame_index=None, f
             if key in robot.logs:
                 log_dt(f"dtR{name}", robot.logs[key])
 
-    info_str = " ".join(log_items)
-    logging.info(info_str)
+
+    #info_str = " ".join(log_items)
+    #logging.info(info_str)
 
 
 @cache
@@ -344,7 +349,7 @@ def record(
     tags=None,
     num_image_writers_per_camera=4,
     force_override=False,
-    display_cameras=True,
+    display_cameras=False,
 ):
     # TODO(rcadene): Add option to record logs
     # TODO(rcadene): Clean this function via decomposition in higher level functions
@@ -433,6 +438,7 @@ def record(
     timestamp = 0
     start_warmup_t = time.perf_counter()
     is_warmup_print = False
+
     while timestamp < warmup_time_s:
         if not is_warmup_print:
             logging.info("Warming up (no data recording)")
@@ -445,6 +451,8 @@ def record(
             observation, action = robot.teleop_step(record_data=True)
         else:
             observation = robot.capture_observation()
+
+        log_observation(observation)
 
         if display_cameras and not is_headless():
             image_keys = [key for key in observation if "image" in key]
@@ -484,6 +492,7 @@ def record(
                     observation, action = robot.teleop_step(record_data=True)
                 else:
                     observation = robot.capture_observation()
+                log_observation(observation)
 
                 image_keys = [key for key in observation if "image" in key]
                 not_image_keys = [key for key in observation if "image" not in key]
@@ -537,6 +546,8 @@ def record(
                     # Action can eventually be clipped using `max_relative_target`,
                     # so action actually sent is saved in the dataset.
                     action = {"action": action_sent}
+
+                log_observation(action)
 
                 for key in action:
                     if key not in ep_dict:
@@ -892,6 +903,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     init_logging()
+    rr.init("lerobot")
+    rr.spawn(memory_limit='25%')
 
     control_mode = args.mode
     robot_path = args.robot_path
@@ -903,6 +916,9 @@ if __name__ == "__main__":
 
     robot_cfg = init_hydra_config(robot_path, robot_overrides)
     robot = make_robot(robot_cfg)
+
+    if isinstance(robot, ManipulatorRobot):
+        rr.send_blueprint(target_state_action_blueprint(robot))
 
     if control_mode == "calibrate":
         calibrate(robot, **kwargs)
