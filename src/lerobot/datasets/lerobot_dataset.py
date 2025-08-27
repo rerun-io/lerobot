@@ -435,7 +435,7 @@ class LeRobotDataset(torch.utils.data.Dataset):
                 multiples of 1/fps. Defaults to 1e-4.
             revision (str, optional): An optional Git revision id which can be a branch name, a tag, or a
                 commit hash. Defaults to current codebase version tag.
-            sync_cache_first (bool, optional): Flag to sync and refresh local files first. If True and files
+            force_cache_sync (bool, optional): Flag to sync and refresh local files first. If True and files
                 are already present in the local cache, this will be faster. However, files loaded might not
                 be in sync with the version on the hub, especially if you specified 'revision'. Defaults to
                 False.
@@ -829,6 +829,8 @@ class LeRobotDataset(torch.utils.data.Dataset):
         """
         if not episode_data:
             episode_buffer = self.episode_buffer
+        else:
+            episode_buffer = episode_data
 
         validate_episode_buffer(episode_buffer, self.meta.total_episodes, self.features)
 
